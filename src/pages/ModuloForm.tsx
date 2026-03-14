@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import { Beaker, Download, Loader2, Trash2 } from 'lucide-react'
@@ -54,6 +54,11 @@ const REVISORES = ['-', 'FABIAN LA ROSA'] as const
 const APROBADORES = ['-', 'IRMA COAQUIRA'] as const
 const HORA_ROWS = Array.from({ length: 5 }, (_, i) => i)
 const HUMEDAD_POINT_COUNT = 3
+
+type TableFieldElement = HTMLInputElement | HTMLSelectElement
+type TableNavigationGroup = 'cargas' | 'humedad' | 'hora'
+
+const getTableFieldKey = (table: TableNavigationGroup, row: number, col: number) => `${table}:${row}:${col}`
 
 type HumedadPointForm = {
     recipiente_numero: string
@@ -222,6 +227,12 @@ const HUMEDAD_ROWS: Array<{
         readOnly: true,
     },
 ]
+const HUMEDAD_NAV_ROWS = {
+    '1': 0,
+    '2': 1,
+    '3': 2,
+    '4': 3,
+} as const
 
 const normalizeArray = <T,>(value: T[] | undefined, length: number, fallback: T): T[] => {
     const result = Array.from({ length }, () => fallback)
@@ -330,6 +341,7 @@ export default function ModuloForm() {
     const [loading, setLoading] = useState(false)
     const [loadingEdit, setLoadingEdit] = useState(false)
     const [ensayoId, setEnsayoId] = useState<number | null>(() => getEnsayoId())
+    const tableFieldRefs = useRef<Record<string, TableFieldElement | null>>({})
 
     useEffect(() => {
         const raw = localStorage.getItem(`${DRAFT_KEY}:${ensayoId ?? 'new'}`)
@@ -419,6 +431,43 @@ export default function ModuloForm() {
             })
         },
         [],
+    )
+
+    const focusTableField = useCallback((table: TableNavigationGroup, row: number, col: number) => {
+        const target = tableFieldRefs.current[getTableFieldKey(table, row, col)]
+        if (!target) return false
+        target.focus()
+        return true
+    }, [])
+
+    const focusNextTableField = useCallback((table: TableNavigationGroup, row: number, col: number) => {
+        const fields = Object.entries(tableFieldRefs.current)
+            .flatMap(([key, element]) => {
+                if (!element) return []
+                const [fieldTable, fieldRow, fieldCol] = key.split(':')
+                const parsedRow = Number(fieldRow)
+                const parsedCol = Number(fieldCol)
+                if (fieldTable !== table || !Number.isInteger(parsedRow) || !Number.isInteger(parsedCol)) return []
+                return [{ row: parsedRow, col: parsedCol, element }]
+            })
+            .sort((a, b) => (a.col === b.col ? a.row - b.row : a.col - b.col))
+
+        const currentIndex = fields.findIndex((field) => field.row === row && field.col === col)
+        const nextField = currentIndex >= 0 ? fields[currentIndex + 1] : null
+        if (!nextField) return false
+
+        nextField.element.focus()
+        return true
+    }, [])
+
+    const handleTableEnter = useCallback(
+        (event: ReactKeyboardEvent<TableFieldElement>, table: TableNavigationGroup, row: number, col: number) => {
+            if (event.key !== 'Enter') return
+            event.preventDefault()
+            if (focusTableField(table, row + 1, col)) return
+            focusNextTableField(table, row, col)
+        },
+        [focusNextTableField, focusTableField],
     )
 
     const clearAll = useCallback(() => {
@@ -587,6 +636,10 @@ export default function ModuloForm() {
                                                     className={denseInputClass}
                                                     value={form.peso_kg[idx] ?? ''}
                                                     onChange={(e) => setArrayNumberField('peso_kg', idx, parseNum(e.target.value))}
+                                                    onKeyDown={(e) => handleTableEnter(e, 'cargas', 0, idx)}
+                                                    ref={(element) => {
+                                                        tableFieldRefs.current[getTableFieldKey('cargas', 0, idx)] = element
+                                                    }}
                                                 />
                                             </div>
                                         </th>
@@ -603,6 +656,10 @@ export default function ModuloForm() {
                                                     className={denseInputClass}
                                                     value={form.esf_normal[idx] ?? ''}
                                                     onChange={(e) => setArrayNumberField('esf_normal', idx, parseNum(e.target.value))}
+                                                    onKeyDown={(e) => handleTableEnter(e, 'cargas', 1, idx)}
+                                                    ref={(element) => {
+                                                        tableFieldRefs.current[getTableFieldKey('cargas', 1, idx)] = element
+                                                    }}
                                                 />
                                             </div>
                                         </th>
@@ -636,6 +693,10 @@ export default function ModuloForm() {
                                                 className={denseInputClass}
                                                 value={form.carga_kg_1[idx] ?? ''}
                                                 onChange={(e) => setArrayNumberField('carga_kg_1', idx, parseNum(e.target.value))}
+                                                onKeyDown={(e) => handleTableEnter(e, 'cargas', idx + 2, 0)}
+                                                ref={(element) => {
+                                                    tableFieldRefs.current[getTableFieldKey('cargas', idx + 2, 0)] = element
+                                                }}
                                             />
                                         </td>
                                         <td className="border-t border-r border-slate-300 px-2 py-1 text-xs text-center">{defValue}</td>
@@ -646,6 +707,10 @@ export default function ModuloForm() {
                                                 className={denseInputClass}
                                                 value={form.carga_kg_2[idx] ?? ''}
                                                 onChange={(e) => setArrayNumberField('carga_kg_2', idx, parseNum(e.target.value))}
+                                                onKeyDown={(e) => handleTableEnter(e, 'cargas', idx + 2, 1)}
+                                                ref={(element) => {
+                                                    tableFieldRefs.current[getTableFieldKey('cargas', idx + 2, 1)] = element
+                                                }}
                                             />
                                         </td>
                                         <td className="border-t border-r border-slate-300 px-2 py-1 text-xs text-center">{defValue}</td>
@@ -656,6 +721,10 @@ export default function ModuloForm() {
                                                 className={denseInputClass}
                                                 value={form.carga_kg_3[idx] ?? ''}
                                                 onChange={(e) => setArrayNumberField('carga_kg_3', idx, parseNum(e.target.value))}
+                                                onKeyDown={(e) => handleTableEnter(e, 'cargas', idx + 2, 2)}
+                                                ref={(element) => {
+                                                    tableFieldRefs.current[getTableFieldKey('cargas', idx + 2, 2)] = element
+                                                }}
                                             />
                                         </td>
                                     </tr>
@@ -696,6 +765,21 @@ export default function ModuloForm() {
                                                                     className={humedadInputClass}
                                                                     value={point[row.field] as string}
                                                                     onChange={(e) => setHumedadField(idx, row.field, e.target.value as HumedadPointForm[typeof row.field])}
+                                                                    onKeyDown={(e) => handleTableEnter(
+                                                                        e,
+                                                                        'humedad',
+                                                                        HUMEDAD_NAV_ROWS[row.key as keyof typeof HUMEDAD_NAV_ROWS],
+                                                                        idx,
+                                                                    )}
+                                                                    ref={(element) => {
+                                                                        tableFieldRefs.current[
+                                                                            getTableFieldKey(
+                                                                                'humedad',
+                                                                                HUMEDAD_NAV_ROWS[row.key as keyof typeof HUMEDAD_NAV_ROWS],
+                                                                                idx,
+                                                                            )
+                                                                        ] = element
+                                                                    }}
                                                                 />
                                                             </td>
                                                         )
@@ -717,6 +801,29 @@ export default function ModuloForm() {
                                                                     )
                                                                 }}
                                                                 readOnly={row.readOnly}
+                                                                onKeyDown={
+                                                                    row.readOnly
+                                                                        ? undefined
+                                                                        : (e) => handleTableEnter(
+                                                                            e,
+                                                                            'humedad',
+                                                                            HUMEDAD_NAV_ROWS[row.key as keyof typeof HUMEDAD_NAV_ROWS],
+                                                                            idx,
+                                                                        )
+                                                                }
+                                                                ref={
+                                                                    row.readOnly
+                                                                        ? undefined
+                                                                        : (element) => {
+                                                                            tableFieldRefs.current[
+                                                                                getTableFieldKey(
+                                                                                    'humedad',
+                                                                                    HUMEDAD_NAV_ROWS[row.key as keyof typeof HUMEDAD_NAV_ROWS],
+                                                                                    idx,
+                                                                                )
+                                                                            ] = element
+                                                                        }
+                                                                }
                                                             />
                                                         </td>
                                                     )
@@ -748,6 +855,10 @@ export default function ModuloForm() {
                                                     className={denseInputClass}
                                                     value={form.hora_1[rowIdx]}
                                                     onChange={(e) => setArrayTextField('hora_1', rowIdx, e.target.value)}
+                                                    onKeyDown={(e) => handleTableEnter(e, 'hora', rowIdx, 0)}
+                                                    ref={(element) => {
+                                                        tableFieldRefs.current[getTableFieldKey('hora', rowIdx, 0)] = element
+                                                    }}
                                                 />
                                             </td>
                                             <td className="border-t border-r border-slate-300 p-1">
@@ -757,6 +868,10 @@ export default function ModuloForm() {
                                                     className={denseInputClass}
                                                     value={form.deform_1[rowIdx] ?? ''}
                                                     onChange={(e) => setArrayNumberField('deform_1', rowIdx, parseNum(e.target.value))}
+                                                    onKeyDown={(e) => handleTableEnter(e, 'hora', rowIdx, 1)}
+                                                    ref={(element) => {
+                                                        tableFieldRefs.current[getTableFieldKey('hora', rowIdx, 1)] = element
+                                                    }}
                                                 />
                                             </td>
                                             <td className="border-t border-r border-slate-300 p-1">
@@ -764,6 +879,10 @@ export default function ModuloForm() {
                                                     className={denseInputClass}
                                                     value={form.hora_2[rowIdx]}
                                                     onChange={(e) => setArrayTextField('hora_2', rowIdx, e.target.value)}
+                                                    onKeyDown={(e) => handleTableEnter(e, 'hora', rowIdx, 2)}
+                                                    ref={(element) => {
+                                                        tableFieldRefs.current[getTableFieldKey('hora', rowIdx, 2)] = element
+                                                    }}
                                                 />
                                             </td>
                                             <td className="border-t border-r border-slate-300 p-1">
@@ -773,6 +892,10 @@ export default function ModuloForm() {
                                                     className={denseInputClass}
                                                     value={form.deform_2[rowIdx] ?? ''}
                                                     onChange={(e) => setArrayNumberField('deform_2', rowIdx, parseNum(e.target.value))}
+                                                    onKeyDown={(e) => handleTableEnter(e, 'hora', rowIdx, 3)}
+                                                    ref={(element) => {
+                                                        tableFieldRefs.current[getTableFieldKey('hora', rowIdx, 3)] = element
+                                                    }}
                                                 />
                                             </td>
                                             <td className="border-t border-r border-slate-300 p-1">
@@ -780,6 +903,10 @@ export default function ModuloForm() {
                                                     className={denseInputClass}
                                                     value={form.hora_3[rowIdx]}
                                                     onChange={(e) => setArrayTextField('hora_3', rowIdx, e.target.value)}
+                                                    onKeyDown={(e) => handleTableEnter(e, 'hora', rowIdx, 4)}
+                                                    ref={(element) => {
+                                                        tableFieldRefs.current[getTableFieldKey('hora', rowIdx, 4)] = element
+                                                    }}
                                                 />
                                             </td>
                                             <td className="border-t border-slate-300 p-1">
@@ -789,6 +916,10 @@ export default function ModuloForm() {
                                                     className={denseInputClass}
                                                     value={form.deform_3[rowIdx] ?? ''}
                                                     onChange={(e) => setArrayNumberField('deform_3', rowIdx, parseNum(e.target.value))}
+                                                    onKeyDown={(e) => handleTableEnter(e, 'hora', rowIdx, 5)}
+                                                    ref={(element) => {
+                                                        tableFieldRefs.current[getTableFieldKey('hora', rowIdx, 5)] = element
+                                                    }}
                                                 />
                                             </td>
                                         </tr>

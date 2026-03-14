@@ -1,3 +1,13 @@
+export type CdHumedadPunto = {
+    recipiente_numero?: string
+    peso_recipiente_g?: number | null
+    peso_recipiente_suelo_humedo_g?: number | null
+    peso_recipiente_suelo_seco_g?: number | null
+    peso_agua_g?: number | null
+    peso_suelo_g?: number | null
+    contenido_humedad_pct?: number | null
+}
+
 export type CdPayload = {
     muestra: string
     numero_ot: string
@@ -8,6 +18,7 @@ export type CdPayload = {
     carga_kg_2?: Array<number | null>
     carga_kg_3?: Array<number | null>
     def_horizontal?: number[]
+    humedad_puntos?: CdHumedadPunto[]
     recipiente_numero?: string
     peso_recipiente_g?: number | null
     peso_recipiente_suelo_humedo_g?: number | null

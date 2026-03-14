@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import { Beaker, Download, Loader2, Trash2 } from 'lucide-react'
 import { getEnsayoDetail, saveAndDownload, saveEnsayo } from '@/services/api'
-import type { CdPayload } from '@/types'
+import type { CdHumedadPunto, CdPayload } from '@/types'
 import FormatConfirmModal from '../components/FormatConfirmModal'
 
 
@@ -53,6 +53,55 @@ const DEF_VALUES = [
 const REVISORES = ['-', 'FABIAN LA ROSA'] as const
 const APROBADORES = ['-', 'IRMA COAQUIRA'] as const
 const HORA_ROWS = Array.from({ length: 5 }, (_, i) => i)
+const HUMEDAD_POINT_COUNT = 3
+
+type HumedadPointForm = {
+    recipiente_numero: string
+    peso_recipiente_g: number | null
+    peso_recipiente_suelo_humedo_g: number | null
+    peso_recipiente_suelo_seco_g: number | null
+    peso_agua_g: number | null
+    peso_suelo_g: number | null
+    contenido_humedad_pct: number | null
+}
+
+const createEmptyHumedadPoint = (): HumedadPointForm => ({
+    recipiente_numero: '',
+    peso_recipiente_g: null,
+    peso_recipiente_suelo_humedo_g: null,
+    peso_recipiente_suelo_seco_g: null,
+    peso_agua_g: null,
+    peso_suelo_g: null,
+    contenido_humedad_pct: null,
+})
+
+const hasHumedadData = (point: Partial<HumedadPointForm> | undefined): boolean => {
+    if (!point) return false
+    return [
+        point.recipiente_numero?.trim(),
+        point.peso_recipiente_g,
+        point.peso_recipiente_suelo_humedo_g,
+        point.peso_recipiente_suelo_seco_g,
+        point.peso_agua_g,
+        point.peso_suelo_g,
+        point.contenido_humedad_pct,
+    ].some((value) => value !== null && value !== undefined && value !== '')
+}
+
+const toHumedadPointForm = (point?: CdHumedadPunto | null): HumedadPointForm => ({
+    recipiente_numero: point?.recipiente_numero ?? '',
+    peso_recipiente_g: point?.peso_recipiente_g ?? null,
+    peso_recipiente_suelo_humedo_g: point?.peso_recipiente_suelo_humedo_g ?? null,
+    peso_recipiente_suelo_seco_g: point?.peso_recipiente_suelo_seco_g ?? null,
+    peso_agua_g: point?.peso_agua_g ?? null,
+    peso_suelo_g: point?.peso_suelo_g ?? null,
+    contenido_humedad_pct: point?.contenido_humedad_pct ?? null,
+})
+
+const normalizeHumedadPoints = (points?: CdHumedadPunto[]): HumedadPointForm[] => {
+    const normalized = Array.from({ length: HUMEDAD_POINT_COUNT }, (_, idx) => toHumedadPointForm(points?.[idx]))
+    return normalized
+}
 
 const getCurrentYearShort = () => new Date().getFullYear().toString().slice(-2)
 
@@ -117,6 +166,63 @@ const round = (value: number, decimals = 4) => {
     return Math.round(value * factor) / factor
 }
 
+const resolveHumedadPoint = (point: HumedadPointForm): HumedadPointForm => {
+    const pesoAgua = point.peso_recipiente_suelo_humedo_g != null && point.peso_recipiente_suelo_seco_g != null
+        ? round(point.peso_recipiente_suelo_humedo_g - point.peso_recipiente_suelo_seco_g)
+        : point.peso_agua_g ?? null
+
+    const pesoSuelo = point.peso_recipiente_suelo_seco_g != null && point.peso_recipiente_g != null
+        ? round(point.peso_recipiente_suelo_seco_g - point.peso_recipiente_g)
+        : point.peso_suelo_g ?? null
+
+    const contenidoHumedad = pesoAgua != null && pesoSuelo != null && pesoSuelo !== 0
+        ? round((pesoAgua / pesoSuelo) * 100, 3)
+        : point.contenido_humedad_pct ?? null
+
+    return {
+        ...point,
+        peso_agua_g: pesoAgua,
+        peso_suelo_g: pesoSuelo,
+        contenido_humedad_pct: contenidoHumedad,
+    }
+}
+
+const HUMEDAD_ROWS: Array<{
+    key: string
+    label: string
+    unit: string
+    field: keyof HumedadPointForm
+    type: 'text' | 'number'
+    readOnly?: boolean
+}> = [
+    { key: '1', label: 'N° del recipiente', unit: '', field: 'recipiente_numero', type: 'text' },
+    { key: '2', label: 'Peso del recipiente', unit: '(g)', field: 'peso_recipiente_g', type: 'number' },
+    {
+        key: '3',
+        label: 'peso del recipiente + Suelo humedo',
+        unit: '(g)',
+        field: 'peso_recipiente_suelo_humedo_g',
+        type: 'number',
+    },
+    {
+        key: '4',
+        label: 'Peso de recipiente + suelo seco',
+        unit: '(g)',
+        field: 'peso_recipiente_suelo_seco_g',
+        type: 'number',
+    },
+    { key: '5', label: 'Peso del agua  (3)-(4)', unit: '(g)', field: 'peso_agua_g', type: 'number', readOnly: true },
+    { key: '6', label: 'peso del suelo (4)-(2)', unit: '(g)', field: 'peso_suelo_g', type: 'number', readOnly: true },
+    {
+        key: '7',
+        label: 'contenido de humedad (5)/(6) * 100',
+        unit: '(%)',
+        field: 'contenido_humedad_pct',
+        type: 'number',
+        readOnly: true,
+    },
+]
+
 const normalizeArray = <T,>(value: T[] | undefined, length: number, fallback: T): T[] => {
     const result = Array.from({ length }, () => fallback)
     if (!value) return result
@@ -141,13 +247,7 @@ type FormState = {
     carga_kg_1: Array<number | null>
     carga_kg_2: Array<number | null>
     carga_kg_3: Array<number | null>
-    recipiente_numero: string
-    peso_recipiente_g: number | null
-    peso_recipiente_suelo_humedo_g: number | null
-    peso_recipiente_suelo_seco_g: number | null
-    peso_agua_g: number | null
-    peso_suelo_g: number | null
-    contenido_humedad_pct: number | null
+    humedad_puntos: HumedadPointForm[]
     hora_1: string[]
     deform_1: Array<number | null>
     hora_2: string[]
@@ -168,13 +268,7 @@ const initialState = (): FormState => ({
     carga_kg_1: Array.from({ length: DEF_VALUES.length }, () => null),
     carga_kg_2: Array.from({ length: DEF_VALUES.length }, () => null),
     carga_kg_3: Array.from({ length: DEF_VALUES.length }, () => null),
-    recipiente_numero: '',
-    peso_recipiente_g: null,
-    peso_recipiente_suelo_humedo_g: null,
-    peso_recipiente_suelo_seco_g: null,
-    peso_agua_g: null,
-    peso_suelo_g: null,
-    contenido_humedad_pct: null,
+    humedad_puntos: Array.from({ length: HUMEDAD_POINT_COUNT }, () => createEmptyHumedadPoint()),
     hora_1: Array.from({ length: HORA_ROWS.length }, () => ''),
     deform_1: Array.from({ length: HORA_ROWS.length }, () => null),
     hora_2: Array.from({ length: HORA_ROWS.length }, () => ''),
@@ -189,6 +283,20 @@ const initialState = (): FormState => ({
 const hydrateForm = (payload?: Partial<CdPayload>): FormState => {
     const base = initialState()
     if (!payload) return base
+
+    const legacyHumedadPoint = toHumedadPointForm({
+        recipiente_numero: payload.recipiente_numero,
+        peso_recipiente_g: payload.peso_recipiente_g,
+        peso_recipiente_suelo_humedo_g: payload.peso_recipiente_suelo_humedo_g,
+        peso_recipiente_suelo_seco_g: payload.peso_recipiente_suelo_seco_g,
+        peso_agua_g: payload.peso_agua_g,
+        peso_suelo_g: payload.peso_suelo_g,
+        contenido_humedad_pct: payload.contenido_humedad_pct,
+    })
+    const humedadPuntos = normalizeHumedadPoints(payload.humedad_puntos)
+    if ((!payload.humedad_puntos || payload.humedad_puntos.length === 0) && hasHumedadData(legacyHumedadPoint)) {
+        humedadPuntos[0] = legacyHumedadPoint
+    }
 
     const revisado = typeof payload.revisado_por === 'string' && payload.revisado_por.trim()
         ? payload.revisado_por
@@ -205,6 +313,7 @@ const hydrateForm = (payload?: Partial<CdPayload>): FormState => {
         carga_kg_1: normalizeArray(payload.carga_kg_1, DEF_VALUES.length, null),
         carga_kg_2: normalizeArray(payload.carga_kg_2, DEF_VALUES.length, null),
         carga_kg_3: normalizeArray(payload.carga_kg_3, DEF_VALUES.length, null),
+        humedad_puntos: humedadPuntos,
         hora_1: normalizeArray(payload.hora_1, HORA_ROWS.length, ''),
         deform_1: normalizeArray(payload.deform_1, HORA_ROWS.length, null),
         hora_2: normalizeArray(payload.hora_2, HORA_ROWS.length, ''),
@@ -300,26 +409,23 @@ export default function ModuloForm() {
         [],
     )
 
+    const setHumedadField = useCallback(
+        <K extends keyof HumedadPointForm>(pointIndex: number, key: K, value: HumedadPointForm[K]) => {
+            setForm((prev) => {
+                const humedadPuntos = prev.humedad_puntos.map((point, idx) =>
+                    idx === pointIndex ? { ...point, [key]: value } : point,
+                )
+                return { ...prev, humedad_puntos: humedadPuntos }
+            })
+        },
+        [],
+    )
+
     const clearAll = useCallback(() => {
         if (!window.confirm('Se limpiaran los datos no guardados. Deseas continuar?')) return
         localStorage.removeItem(`${DRAFT_KEY}:${ensayoId ?? 'new'}`)
         setForm(initialState())
     }, [ensayoId])
-
-    const computedPesoAgua = useMemo(() => {
-        if (form.peso_recipiente_suelo_humedo_g == null || form.peso_recipiente_suelo_seco_g == null) return null
-        return round(form.peso_recipiente_suelo_humedo_g - form.peso_recipiente_suelo_seco_g)
-    }, [form.peso_recipiente_suelo_humedo_g, form.peso_recipiente_suelo_seco_g])
-
-    const computedPesoSuelo = useMemo(() => {
-        if (form.peso_recipiente_suelo_seco_g == null || form.peso_recipiente_g == null) return null
-        return round(form.peso_recipiente_suelo_seco_g - form.peso_recipiente_g)
-    }, [form.peso_recipiente_suelo_seco_g, form.peso_recipiente_g])
-
-    const computedHumedad = useMemo(() => {
-        if (computedPesoAgua == null || computedPesoSuelo == null || computedPesoSuelo === 0) return null
-        return round((computedPesoAgua / computedPesoSuelo) * 100, 3)
-    }, [computedPesoAgua, computedPesoSuelo])
     const [pendingFormatAction, setPendingFormatAction] = useState<boolean | null>(null)
 
 
@@ -331,12 +437,19 @@ export default function ModuloForm() {
             }
             setLoading(true)
             try {
+                const humedadPuntos = form.humedad_puntos.map(resolveHumedadPoint)
+                const humedadPrincipal = humedadPuntos[0] ?? createEmptyHumedadPoint()
                 const payload: CdPayload = {
                     ...form,
                     def_horizontal: [...DEF_VALUES],
-                    peso_agua_g: form.peso_agua_g ?? computedPesoAgua,
-                    peso_suelo_g: form.peso_suelo_g ?? computedPesoSuelo,
-                    contenido_humedad_pct: form.contenido_humedad_pct ?? computedHumedad,
+                    humedad_puntos: humedadPuntos,
+                    recipiente_numero: humedadPrincipal.recipiente_numero,
+                    peso_recipiente_g: humedadPrincipal.peso_recipiente_g,
+                    peso_recipiente_suelo_humedo_g: humedadPrincipal.peso_recipiente_suelo_humedo_g,
+                    peso_recipiente_suelo_seco_g: humedadPrincipal.peso_recipiente_suelo_seco_g,
+                    peso_agua_g: humedadPrincipal.peso_agua_g,
+                    peso_suelo_g: humedadPrincipal.peso_suelo_g,
+                    contenido_humedad_pct: humedadPrincipal.contenido_humedad_pct,
                 }
 
                 if (download) {
@@ -369,9 +482,6 @@ export default function ModuloForm() {
         [
             ensayoId,
             form,
-            computedPesoAgua,
-            computedPesoSuelo,
-            computedHumedad,
         ],
     )
 
@@ -379,6 +489,9 @@ export default function ModuloForm() {
         'h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-900 shadow-sm transition focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-500/35'
 
     const readOnlyInputClass = 'h-8 w-full rounded-md border border-slate-200 bg-slate-100 px-2 text-sm text-slate-800'
+    const humedadInputClass = `${denseInputClass} text-center`
+    const humedadReadOnlyInputClass = `${readOnlyInputClass} text-center`
+    const resolvedHumedadPuntos = form.humedad_puntos.map(resolveHumedadPoint)
 
     return (
         <div className="min-h-screen bg-slate-100 p-4 md:p-6">
@@ -554,95 +667,65 @@ export default function ModuloForm() {
                             <div className="mb-2 text-center text-xs font-semibold text-slate-800">
                                 CONTENIDO DE HUMEDAD - NTP 339.127
                             </div>
-                            <table className="w-full table-fixed text-sm">
-                                <colgroup>
-                                    <col className="w-10" />
-                                    <col />
-                                    <col className="w-20" />
-                                    <col className="w-44" />
-                                </colgroup>
-                                <tbody>
-                                    {[
-                                        {
-                                            key: '1',
-                                            label: 'N° del recipiente',
-                                            unit: '',
-                                            value: form.recipiente_numero,
-                                            onChange: (value: string) => setField('recipiente_numero', value),
-                                            type: 'text',
-                                        },
-                                        {
-                                            key: '2',
-                                            label: 'Peso del recipiente',
-                                            unit: '(g)',
-                                            value: form.peso_recipiente_g,
-                                            onChange: (value: number | null) => setField('peso_recipiente_g', value),
-                                        },
-                                        {
-                                            key: '3',
-                                            label: 'peso del recipiente + Suelo humedo',
-                                            unit: '(g)',
-                                            value: form.peso_recipiente_suelo_humedo_g,
-                                            onChange: (value: number | null) => setField('peso_recipiente_suelo_humedo_g', value),
-                                        },
-                                        {
-                                            key: '4',
-                                            label: 'Peso de recipiente + suelo seco',
-                                            unit: '(g)',
-                                            value: form.peso_recipiente_suelo_seco_g,
-                                            onChange: (value: number | null) => setField('peso_recipiente_suelo_seco_g', value),
-                                        },
-                                        {
-                                            key: '5',
-                                            label: 'Peso del agua  (3)-(4)',
-                                            unit: '(g)',
-                                            value: form.peso_agua_g ?? computedPesoAgua,
-                                            readOnly: true,
-                                        },
-                                        {
-                                            key: '6',
-                                            label: 'peso del suelo (4)-(2)',
-                                            unit: '(g)',
-                                            value: form.peso_suelo_g ?? computedPesoSuelo,
-                                            readOnly: true,
-                                        },
-                                        {
-                                            key: '7',
-                                            label: 'contenido de humedad (5)/(6) * 100',
-                                            unit: '(%)',
-                                            value: form.contenido_humedad_pct ?? computedHumedad,
-                                            readOnly: true,
-                                        },
-                                    ].map((row) => (
-                                        <tr key={row.key}>
-                                            <td className="border-t border-r border-slate-300 px-2 py-1 text-xs text-center">{row.key}</td>
-                                            <td className="border-t border-r border-slate-300 px-2 py-1 text-xs">{row.label}</td>
-                                            <td className="border-t border-r border-slate-300 px-2 py-1 text-center text-xs">{row.unit}</td>
-                                            <td className="border-t border-slate-300 p-1">
-                                                {row.type === 'text' ? (
-                                                    <input
-                                                        className={denseInputClass}
-                                                        value={row.value as string}
-                                                        onChange={(e) => row.onChange?.(e.target.value)}
-                                                    />
-                                                ) : (
-                                                    <input
-                                                        type="number"
-                                                        step="any"
-                                                        className={row.readOnly ? readOnlyInputClass : denseInputClass}
-                                                        value={(row.value as number | null) ?? ''}
-                                                        onChange={(e) => {
-                                                            if (row.readOnly) return
-                                                            row.onChange?.(parseNum(e.target.value))
-                                                        }}
-                                                        readOnly={row.readOnly}
-                                                    />
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                            <div className="overflow-x-auto">
+                                <table className="min-w-[920px] w-full table-fixed text-sm">
+                                    <colgroup>
+                                        <col className="w-10" />
+                                        <col />
+                                        <col className="w-20" />
+                                        {Array.from({ length: HUMEDAD_POINT_COUNT }).map((_, idx) => (
+                                            <col key={idx} className="w-32" />
+                                        ))}
+                                    </colgroup>
+                                    <tbody>
+                                        {HUMEDAD_ROWS.map((row) => (
+                                            <tr key={row.key}>
+                                                <td className="border-t border-r border-slate-300 px-2 py-1 text-xs text-center">{row.key}</td>
+                                                <td className="border-t border-r border-slate-300 px-2 py-1 text-xs">{row.label}</td>
+                                                <td className="border-t border-r border-slate-300 px-2 py-1 text-center text-xs">{row.unit}</td>
+                                                {form.humedad_puntos.map((point, idx) => {
+                                                    const resolvedPoint = resolvedHumedadPuntos[idx]
+                                                    const cellClass = idx < HUMEDAD_POINT_COUNT - 1
+                                                        ? 'border-t border-r border-slate-300 p-1'
+                                                        : 'border-t border-slate-300 p-1'
+
+                                                    if (row.type === 'text') {
+                                                        return (
+                                                            <td key={`${row.key}-${idx}`} className={cellClass}>
+                                                                <input
+                                                                    className={humedadInputClass}
+                                                                    value={point[row.field] as string}
+                                                                    onChange={(e) => setHumedadField(idx, row.field, e.target.value as HumedadPointForm[typeof row.field])}
+                                                                />
+                                                            </td>
+                                                        )
+                                                    }
+
+                                                    return (
+                                                        <td key={`${row.key}-${idx}`} className={cellClass}>
+                                                            <input
+                                                                type="number"
+                                                                step="any"
+                                                                className={row.readOnly ? humedadReadOnlyInputClass : humedadInputClass}
+                                                                value={(row.readOnly ? resolvedPoint[row.field] : point[row.field]) ?? ''}
+                                                                onChange={(e) => {
+                                                                    if (row.readOnly) return
+                                                                    setHumedadField(
+                                                                        idx,
+                                                                        row.field,
+                                                                        parseNum(e.target.value) as HumedadPointForm[typeof row.field],
+                                                                    )
+                                                                }}
+                                                                readOnly={row.readOnly}
+                                                            />
+                                                        </td>
+                                                    )
+                                                })}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
 
                         <div className="mt-4 rounded-lg border border-slate-300">
